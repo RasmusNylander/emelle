@@ -1,9 +1,12 @@
 import numpy as np
 import pandas as pd
+import sklearn.linear_model
 from scipy.linalg import svd
-from numpy import ndarray, uint
+from numpy import double, ndarray
 import matplotlib.pyplot as plt
 from pandas import DataFrame
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.model_selection import KFold
 from sklearn.preprocessing import LabelBinarizer
 
 names = ['id', 'jitter_local', 'jitter_local_absolute', 'jitter_rap', 'jitter_ppq5', 'jitter_ddp', 'shimmer_local',
@@ -86,6 +89,32 @@ def plot_data_projected_unto_principal_components(projected_data: ndarray, class
 			subplots[(d1 + d2 - 1) % num_rows, (d1 + d2 - 1) % num_columns ].set(xlabel=f'PC{d1}', ylabel=f'PC{d2}')
 
 
+def estimated_generalisation_error(model_generator_λ, data: ndarray, truth: ndarray, folds: KFold):
+	test_error = np.empty((folds.n_splits, 1))
+	train_error = np.empty((folds.n_splits, 1))
+	generalisation_error = 0
+	split_num = 0
+	for train_index, test_index in folds.split(data, truth):
+		train_data: ndarray = data[train_index]
+		train_truth: ndarray = truth[train_index]
+		test_data: ndarray = data[test_index]
+		test_truth: ndarray = truth[test_index]
+
+		model = model_generator_λ()
+		model.fit(train_data, train_truth)
+		train_predict = model.predict(train_data).T
+		test_predict = model.predict(test_data).T
+		train_error[split_num] = sum_of_squares(train_truth, train_predict)/len(train_truth)
+		test_error[split_num] = sum_of_squares(test_truth, test_predict)/len(test_truth)
+		generalisation_error += test_error[split_num]
+		split_num += 1
+	generalisation_error /= folds.n_splits
+	return generalisation_error
+
+def sum_of_squares(truth: ndarray, predictions: ndarray) -> double:
+	difference: ndarray = truth-predictions
+	return (difference.T*difference).sum()
+
 if __name__ == '__main__':
 	plt.close('all')
 	savePlots: bool = False
@@ -106,6 +135,17 @@ if __name__ == '__main__':
 
 	data_projected = data @ V[:, :num_pc_to_threshold]  # Data projected onto {num_pc_to_threshold} pr
 	plot_data_projected_unto_principal_components(data @ V[:, :4], class_labels)
+
+	λ = [0, 0.0001, 0.001, 0.01, 0.1, 1, 5, 29752]
+	generalisation_error = []
+	folds: KFold = KFold(10, shuffle=True)
+	for i, λambda in enumerate(λ):
+		generalisation_error.append(
+			estimated_generalisation_error(
+				lambda: LinearRegression(),
+				data_projected, UPDRS, folds)
+		)
+
 
 	plt.show()
 
