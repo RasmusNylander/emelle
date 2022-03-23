@@ -89,7 +89,7 @@ def plot_data_projected_unto_principal_components(projected_data: ndarray, class
 			subplots[(d1 + d2 - 1) % num_rows, (d1 + d2 - 1) % num_columns ].set(xlabel=f'PC{d1}', ylabel=f'PC{d2}')
 
 
-def estimated_generalisation_error(model_generator_λ, data: ndarray, truth: ndarray, folds: KFold):
+def estimated_generalisation_error(model_generator_λ, cost_function, data: ndarray, truth: ndarray, folds: KFold):
 	test_error = np.empty((folds.n_splits, 1))
 	train_error = np.empty((folds.n_splits, 1))
 	generalisation_error = 0
@@ -104,9 +104,11 @@ def estimated_generalisation_error(model_generator_λ, data: ndarray, truth: nda
 		model.fit(train_data, train_truth)
 		train_predict = model.predict(train_data).T
 		test_predict = model.predict(test_data).T
-		train_error[split_num] = sum_of_squares(train_truth, train_predict)/len(train_truth)
-		test_error[split_num] = sum_of_squares(test_truth, test_predict)/len(test_truth)
+
+		train_error[split_num] = cost_function(train_truth, train_predict)/len(train_truth)
+		test_error[split_num] = cost_function(test_truth, test_predict)/len(test_truth)
 		generalisation_error += test_error[split_num]
+
 		split_num += 1
 	generalisation_error /= folds.n_splits
 	return generalisation_error
@@ -143,6 +145,7 @@ if __name__ == '__main__':
 		generalisation_error.append(
 			estimated_generalisation_error(
 				lambda: LinearRegression(),
+				lambda truth, prediction: sum_of_squares(truth, prediction),
 				data_projected, UPDRS, folds)
 		)
 
