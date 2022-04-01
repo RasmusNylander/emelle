@@ -89,6 +89,108 @@ def plot_data_projected_unto_principal_components(projected_data: ndarray, class
 			subplots[(d1 + d2 - 1) % num_rows, (d1 + d2 - 1) % num_columns ].set(xlabel=f'PC{d1}', ylabel=f'PC{d2}')
 
 
+def sum_of_squares(truth: ndarray, predictions: ndarray) -> double:
+	difference: ndarray = truth-predictions
+	return (difference.T*difference).sum()
+
+
+def squared_error(truth: ndarray, predictions: ndarray) -> double:
+	return np.square(truth - predictions).mean(axis=0)
+
+
+def regularised_linear_regression_model_weights(dataTdata: ndarray, dataTtruth: ndarray, λ: float = 0) -> ndarray:
+	λDiagonalMatrix: ndarray = λ * np.eye(dataTdata.shape[0])
+	λDiagonalMatrix[0, 0] = 0  # Do not regularize the bias term
+	w_rlr = np.linalg.solve(dataTdata + λDiagonalMatrix, dataTtruth).squeeze()
+	return w_rlr
+
+
+def gen_error_given_λ(data: ndarray, truth: ndarray, folds: KFold, λs: ndarray) -> (ndarray, ndarray):
+	N, M = data.shape
+
+	# Add offset attribute
+	data = np.concatenate((np.ones((data.shape[0], 1)), data), 1)
+	M = M + 1
+
+	# Error for each value of λ for each fold
+	error_train: ndarray = np.empty((len(λs), folds.n_splits))
+	error_test: ndarray = np.empty((len(λs), folds.n_splits))
+
+	w_rlr: ndarray = np.empty(M)  # weights for regularized logistic regression
+
+	for k, (train_index, test_index) in enumerate(folds.split(data, truth)):
+		# Extract training and test set for current CV fold
+		data_train: ndarray = data[train_index]
+		truth_train: ndarray = truth[train_index]
+		data_test: ndarray = data[test_index]
+		truth_test: ndarray = truth[test_index]
+
+		dataTdata: ndarray = data_train.T @ data_train
+		dataTtruth: ndarray = data_train.T @ truth_train
+
+		for i in range(0, len(λs)):
+			w_rlr = regularised_linear_regression_model_weights(dataTdata, dataTtruth, λs[i])
+			error_train[i, k] = squared_error(truth_train, data_train @ w_rlr)
+			error_test[i, k] = squared_error(truth_test, data_test @ w_rlr)
+
+	error_gen: ndarray = np.mean(error_test, axis=1)
+	error_μ_train: ndarray = np.mean(error_train, axis=1)
+	return (error_gen, error_μ_train)
+
+
+if __name__ == '__main__':
+	plt.close('all')
+	savePlots: bool = False
+	dataframe: DataFrame = get_data("train_data.txt")
+	class_labels: ndarray = dataframe.iloc[:, -1].to_numpy()
+	UPDRS: ndarray = dataframe.iloc[:, -2].to_numpy()
+	dataframe: DataFrame = dataframe.iloc[:, 1:-2]  # drop the subject ID, UPDRS, and class label
+	data: ndarray = normalised_data(dataframe.to_numpy())
+	data: ndarray = one_out_of_k_encode_sounds(data, [3, 10, 4, 9])
+
+	# PCA
+	(U, Σ, Vh) = svd(data)
+	V = Vh.T
+
+	ρ: ndarray = explained_var(Σ)
+	threshold = 0.9
+	#plot_explained_variance(ρ, threshold, "PCA_explained_variance.pdf")
+	num_pc_to_threshold = (np.cumsum(ρ) < threshold).sum() + 1
+	print(f"Acceptable threshold: {threshold}\nRequired number of components: {num_pc_to_threshold}")
+
+	data_projected = data @ V[:, :num_pc_to_threshold]  # Data projected onto {num_pc_to_threshold} pr
+	#plot_data_projected_unto_principal_components(data @ V[:, :4], class_labels)
+
+
+	# Regularised Linear Regression, using 10-fold cross validation
+	folds: KFold = KFold(10, shuffle=True)
+	λs: ndarray = np.power(10, np.arange(-1, 7, 0.001))
+	optimal_λ: ndarray = np.empty(folds.n_splits)
+	for k, (train_indicies, test_indicies) in enumerate(folds):
+		# This loop currently does nothing - no cross-validation is done by this loop
+		(error_gen_λ, error_train_μ_λ) = gen_error_given_λ(data_projected, UPDRS, folds, λs)
+
+		min_λ_index = np.argmin(error_gen_λ, axis=0)
+		rlr_model_optimal_λ = regularised_linear_regression_model_weights(data_projected.T @ data_projected, data_projected.T @ UPDRS, λs[min_λ_index])
+		print(f"Fold: {k}\nOptimal λ: {λs[min_λ_index]}\nModel weights: {rlr_model_optimal_λ}")
+
+	# Plot Generalisation error and mean train error as a function of λ
+	plt.figure(3, figsize=(23.4, 16.5))
+	plt.loglog(λs, error_gen_λ.T, 'r.-', λs, error_train_μ_λ.T, 'b.-')
+	plt.axvline(x=λs[min_λ_index], color='k', linestyle='--')
+	plt.xlabel('Regularization factor (λ)')
+	plt.ylabel('Squared error (cross - validation)')
+	plt.legend(['Generalisation error', 'Train error'])
+	plt.grid()
+
+
+
+	plt.show()
+
+
+
+
+# Old, probably ignore
 def estimated_generalisation_error(model_generator_λ, cost_function, data: ndarray, truth: ndarray, folds: KFold):
 	test_error = np.empty((folds.n_splits, 1))
 	train_error = np.empty((folds.n_splits, 1))
@@ -112,46 +214,3 @@ def estimated_generalisation_error(model_generator_λ, cost_function, data: ndar
 		split_num += 1
 	generalisation_error /= folds.n_splits
 	return generalisation_error
-
-def sum_of_squares(truth: ndarray, predictions: ndarray) -> double:
-	difference: ndarray = truth-predictions
-	return (difference.T*difference).sum()
-
-if __name__ == '__main__':
-	plt.close('all')
-	savePlots: bool = False
-	dataframe: DataFrame = get_data("train_data.txt")
-	class_labels: ndarray = dataframe.iloc[:, -1].to_numpy()
-	UPDRS: ndarray = dataframe.iloc[:, -2].to_numpy()
-	dataframe: DataFrame = dataframe.iloc[:, 1:-2]  # drop the subject ID, UPDRS, and class label
-	data: ndarray = normalised_data(dataframe.to_numpy())
-	data: ndarray = one_out_of_k_encode_sounds(data, [3, 10, 4, 9])
-	(U, Σ, Vh) = svd(data)
-	V = Vh.T
-
-	ρ: ndarray = explained_var(Σ)
-	threshold = 0.9
-	plot_explained_variance(ρ, threshold, "PCA_explained_variance.pdf")
-	num_pc_to_threshold = (np.cumsum(ρ) < threshold).sum() + 1
-	print(f"Acceptable threshold: {threshold}\nRequired number of components: {num_pc_to_threshold}")
-
-	data_projected = data @ V[:, :num_pc_to_threshold]  # Data projected onto {num_pc_to_threshold} pr
-	plot_data_projected_unto_principal_components(data @ V[:, :4], class_labels)
-
-	λ = [0, 0.0001, 0.001, 0.01, 0.1, 1, 5, 29752]
-	generalisation_error = []
-	folds: KFold = KFold(10, shuffle=True)
-	for i, λambda in enumerate(λ):
-		generalisation_error.append(
-			estimated_generalisation_error(
-				lambda: LinearRegression(),
-				lambda truth, prediction: sum_of_squares(truth, prediction),
-				data_projected, UPDRS, folds)
-		)
-
-
-	plt.show()
-
-
-
-
