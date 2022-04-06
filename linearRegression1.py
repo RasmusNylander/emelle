@@ -3,6 +3,7 @@ from matplotlib import pyplot as plt
 from numpy import double, ndarray
 from sklearn.model_selection import KFold
 from joblib import Parallel, delayed
+from tqdm import tqdm, trange
 
 from PCA import project_data_onto_pcs
 from loadData import load_data
@@ -49,6 +50,9 @@ def gen_error_given_λ(data: ndarray, truth: ndarray, folds: KFold, λs: ndarray
 	error_μ_train: ndarray = np.mean(error_train, axis=1)
 	return error_gen, error_μ_train
 
+def gen_error_given_λ_new_fold(data: ndarray, truth: ndarray, K: int, λs: ndarray) -> (ndarray, ndarray):
+	return gen_error_given_λ(data, truth, KFold(n_splits=K, shuffle=True), λs)
+
 if __name__ == '__main__':
 	(data, class_labels, UPDRS) = load_data("train_data.txt")
 	projected_data = project_data_onto_pcs(data, 0.9)
@@ -58,10 +62,10 @@ if __name__ == '__main__':
 	λs: ndarray = np.power(10, np.arange(0, 7, 0.0005))
 	# We repeat it multiple times, and take the average of the results
 	# This ensures that if we run it multiple times, we always get more or less the same result.
-	repetitions: int = 100
-	(gen_errors_λ, train_errors_μ_λ) = zip(*Parallel(n_jobs=20)(
-		delayed(gen_error_given_λ)(projected_data, UPDRS, KFold(K, shuffle=True), λs)
-		for i in range(0, repetitions)
+	repetitions: int = 1000
+	(gen_errors_λ, train_errors_μ_λ) = zip(*Parallel(n_jobs=10)(
+		delayed(gen_error_given_λ_new_fold)(projected_data, UPDRS, K, λs)
+		for i in trange(repetitions, desc="Regularised Linear Regression", nrows=11, position=0)
 	))
 
 	generalisation_errors = np.mean(gen_errors_λ, axis=0)
