@@ -2,6 +2,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from numpy import double, ndarray
 from sklearn.model_selection import KFold
+from joblib import Parallel, delayed
 
 from PCA import project_data_onto_pcs
 from loadData import load_data
@@ -48,26 +49,23 @@ def gen_error_given_λ(data: ndarray, truth: ndarray, folds: KFold, λs: ndarray
 	error_μ_train: ndarray = np.mean(error_train, axis=1)
 	return error_gen, error_μ_train
 
-
 if __name__ == '__main__':
 	(data, class_labels, UPDRS) = load_data("train_data.txt")
 	projected_data = project_data_onto_pcs(data, 0.9)
 
 	# Regularised Linear Regression, using 10-fold cross validation
 	K: int = 10
-	λs: ndarray = np.power(10, np.arange(-1, 7, 0.001))
+	λs: ndarray = np.power(10, np.arange(0, 7, 0.0005))
 	# We repeat it multiple times, and take the average of the results
 	# This ensures that if we run it multiple times, we always get more or less the same result.
-	repetitions: int = 50
-	gen_errors_λ: ndarray = np.empty((len(λs), repetitions))
-	train_errors_μ_λ: ndarray = np.empty((len(λs), repetitions))
+	repetitions: int = 100
+	(gen_errors_λ, train_errors_μ_λ) = zip(*Parallel(n_jobs=20)(
+		delayed(gen_error_given_λ)(projected_data, UPDRS, KFold(K, shuffle=True), λs)
+		for i in range(0, repetitions)
+	))
 
-	for i in range(0, repetitions):
-		folds: KFold = KFold(K, shuffle=True)
-		# (gen_errors, train_errors_μ) = gen_error_given_λ(projected_data, class_labels, folds, λs)
-		(gen_errors_λ[:, i], train_errors_μ_λ[:, i]) = gen_error_given_λ(projected_data, UPDRS, folds, λs)
-	generalisation_errors = np.mean(gen_errors_λ, axis=1)
-	training_errors: ndarray = np.mean(train_errors_μ_λ, axis=1)
+	generalisation_errors = np.mean(gen_errors_λ, axis=0)
+	training_errors: ndarray = np.mean(train_errors_μ_λ, axis=0)
 
 	min_λ_index = np.argmin(generalisation_errors, axis=0)
 	rlr_model_optimal_λ = regularised_linear_regression_model_weights(projected_data.T @ projected_data, projected_data.T @ UPDRS, λs[min_λ_index])
