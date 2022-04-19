@@ -67,11 +67,10 @@ if __name__ == '__main__':
 	projected_data = project_data_onto_pcs(data, 0.9)
 	projected_data = np.concatenate((np.ones((projected_data.shape[0],1)),projected_data),1)
 
-	K = 3
+	K = 5
 
-	#hidden_units = [1, 2, 3, 4, 5]
-	hidden_units = [1, 2, 3]
-	λs = np.arange(48.8, 48.9, 0.00001)
+	hidden_units = [1, 2, 3, 4, 5]
+	λs = np.arange(48.87, 48.94, 0.0001)
 
 	error_val = np.empty((K, 3))
 	table_meta_info = np.empty((K, 2))
@@ -82,17 +81,17 @@ if __name__ == '__main__':
 		UPDRS_train, UPDRS_test = UPDRS[train_index], UPDRS[test_index]
 		CV2 = KFold(n_splits=K, shuffle=True)
 
-		baseline_error_val: ndarray = np.empty((CV2.n_splits, 1))
+		baseline_models: ndarray = np.empty((CV2.n_splits))
+		baseline_error_val: ndarray = np.empty((CV2.n_splits))
 		for j, (train_index2, test_index2) in enumerate(CV2.split(data_train)):
 			UPDRS_train2, UPDRS_test2 = UPDRS_train[train_index2], UPDRS_train[test_index2]
-			baseline = np.mean(UPDRS_train2)
-			baseline_error_val[j] = squared_error(UPDRS_test2, np.ones((UPDRS_test.shape[0], 1)) * baseline).sum()
-		baseline_error_val = baseline_error_val / CV2.n_splits
+			baseline_models[j] = np.mean(UPDRS_train2)
+			baseline_error_val[j] = squared_error(UPDRS_test2, np.ones((UPDRS_test2.shape[0])) * baseline_models[j])
 
 		(rlr_error_val, _) = gen_error_given_λ(data_train, UPDRS_train, CV2, λs)
 		(ann_error_val, _) = gen_error_given_hidden_units(data_train, UPDRS_train, CV2, hidden_units)
 
-		error_val[i, 0] = squared_error(UPDRS_test, np.ones((UPDRS_test.shape[0], 1)) * baseline).sum()
+		error_val[i, 0] = squared_error(UPDRS_test, np.ones((UPDRS_test.shape[0])) * baseline_models[baseline_error_val.argmin()])
 		error_val[i, 1], table_meta_info[i, 0] = rlr_error_val.min(), λs[rlr_error_val.argmin()]
 		error_val[i, 2], table_meta_info[i, 1] = ann_error_val.min(), hidden_units[ann_error_val.argmin()]
 	print_table(error_val, table_meta_info)
