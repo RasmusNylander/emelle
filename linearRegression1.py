@@ -20,8 +20,7 @@ def squared_error(truth: ndarray, predictions: ndarray) -> double:
 	return np.square(truth - predictions).mean(axis=0)
 
 
-def gen_error_and_weights_given_λ(data: ndarray, truth: ndarray, folds: KFold, λs: ndarray) -> (
-ndarray, ndarray, ndarray):
+def gen_error_given_λ(data: ndarray, truth: ndarray, folds: KFold, λs: ndarray) -> (ndarray, ndarray):
 	N, M = data.shape
 
 	# Add offset attribute
@@ -32,7 +31,7 @@ ndarray, ndarray, ndarray):
 	error_train: ndarray = np.empty((len(λs), folds.n_splits))
 	error_test: ndarray = np.ones((len(λs), folds.n_splits))*np.inf
 
-	w_rlr: ndarray = np.empty(M, len(λs))  # weights for regularized logistic regression
+	w_rlr: ndarray = np.empty(M)  # weights for regularized logistic regression
 
 	for k, (train_index, test_index) in enumerate(folds.split(data, truth)):
 		# Extract training and test set for current CV fold
@@ -45,19 +44,12 @@ ndarray, ndarray, ndarray):
 		dataTtruth: ndarray = data_train.T @ truth_train
 
 		for i in range(0, len(λs)):
-			w_rlr_temp = regularised_linear_regression_model_weights(dataTdata, dataTtruth, λs[i])
-			error_train[i, k] = squared_error(truth_train, data_train @ w_rlr_temp)
-			error_test[i, k] = squared_error(truth_test, data_test @ w_rlr_temp)
-			if error_test[i].min() > error_test[i, k]:
-				w_rlr[:, i] = w_rlr_temp
+			w_rlr = regularised_linear_regression_model_weights(dataTdata, dataTtruth, λs[i])
+			error_train[i, k] = squared_error(truth_train, data_train @ w_rlr)
+			error_test[i, k] = squared_error(truth_test, data_test @ w_rlr)
 
 	error_gen: ndarray = np.mean(error_test, axis=1)
 	error_μ_train: ndarray = np.mean(error_train, axis=1)
-	return error_gen, error_μ_train, w_rlr
-
-
-def gen_error_given_λ(data: ndarray, truth: ndarray, folds: KFold, λs: ndarray) -> (ndarray, ndarray):
-	error_gen, error_μ_train, _ = gen_error_and_weights_given_λ(data, truth, folds, λs)
 	return error_gen, error_μ_train
 
 

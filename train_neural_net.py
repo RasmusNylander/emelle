@@ -1,8 +1,11 @@
 import numpy as np
+import torch
 from numpy import ndarray
+from torch import Tensor
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def train_neural_net(model, loss_fn, X, y,
+def train_neural_net(model, loss_fn, data, truth,
 					 n_replicates=3, max_iter=10000, tolerance=1e-6):
 	"""
 	Train a neural network with PyTorch based on a training set consisting of
@@ -70,42 +73,47 @@ def train_neural_net(model, loss_fn, X, y,
 			learning_curve: A list containing the learning curve of the best net.
 
 	"""
-	from joblib import Parallel, delayed
-	#from tqdm import trange
-	#networks, loss, learning_curves = zip(*Parallel(n_jobs=min(3, n_replicates))(
+	networks: ndarray = np.empty(n_replicates, dtype=object)
+	final_losses: Tensor = torch.empty(n_replicates, device=device)
+	learning_curves: Tensor = torch.empty(n_replicates, max_iter, device=device).type(torch.FloatTensor)
+	for i in range(n_replicates):
+		networks[i], final_losses[i], learning_curves[i, :] = train_net(model().to(device), max_iter, tolerance, data, truth, loss_fn)
+
+	#from joblib import Parallel, delayed
+	#networks, loss, learning_curves = zip(*Parallel(n_jobs=min(5, n_replicates))(
 	#	delayed(train_net)(model, max_iter, tolerance, X, y, loss_fn)
-	#	for i in trange(n_replicates, desc="Training neural networks")
+	#	for i in range(n_replicates)
 	#))
-	networks, loss, learning_curves = zip(*Parallel(n_jobs=min(3, n_replicates))(
-		delayed(train_net)(model, max_iter, tolerance, X, y, loss_fn)
-		for i in range(n_replicates)
-	))
+
+	#networks, loss, learning_curves = zip(*Parallel(n_jobs=1)(
+	#	delayed(train_net)(model, max_iter, tolerance, X, y, loss_fn)
+	#	for i in range(n_replicates)
+	#))
+
 
 	# Return the best curve along with its final loss and learing curve
-	return networks[np.argmin(loss)], np.min(loss), learning_curves[np.argmin(loss)]
+	return networks[torch.argmin(final_losses)], torch.min(final_losses), learning_curves[torch.argmin(final_losses)]
 
 
-def train_net(network_creator, max_iterations, tolerance, data, truth, loss_function):
+def train_net(network, max_iterations, tolerance, data, truth, loss_function):
 	import torch
-	learning_curve = []  # setup storage for loss at each step
+	learning_curve: Tensor = torch.zeros(max_iterations, device=device)  # setup storage for loss at each step
 	old_loss = 1e6
-	network = network_creator()
-	torch.nn.init.xavier_uniform_(network[0].weight)
-	torch.nn.init.xavier_uniform_(network[2].weight)
+	torch.nn.init.xavier_uniform_(network[0].weight).to(device)
+	torch.nn.init.xavier_uniform_(network[2].weight).to(device)
 	optimizer = torch.optim.Adam(network.parameters())
 	for i in range(max_iterations):
 		y_est = network(data).squeeze() # forward pass, predict labels on training set
 		loss = loss_function(y_est, truth)  # determine loss
-		loss_value = loss.data.numpy()  # get numpy array instead of tensor
-		learning_curve.append(loss_value)  # record loss for later display
+		loss_value = loss.data
+		learning_curve[i] = loss_value # record loss for later display
 
 		# Convergence check, see if the percentual loss decrease is within
 		# tolerance:
-		p_delta_loss = np.abs(loss_value - old_loss) / old_loss
+		p_delta_loss = torch.abs(loss_value - old_loss) / old_loss
 		if p_delta_loss < tolerance: break
 		old_loss = loss_value
 
-		# display loss with some frequency:
 		# do backpropagation of loss and optimize weights
 		optimizer.zero_grad()
 		loss.backward()
