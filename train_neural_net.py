@@ -5,7 +5,7 @@ from torch import Tensor
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def train_neural_net(model, loss_fn, data, truth,
+def train_neural_net(model, loss_fn, data: Tensor, truth: Tensor,
 					 n_replicates=3, max_iter=10000, tolerance=1e-6):
 	"""
 	Train a neural network with PyTorch based on a training set consisting of
@@ -73,26 +73,15 @@ def train_neural_net(model, loss_fn, data, truth,
 			learning_curve: A list containing the learning curve of the best net.
 
 	"""
-	networks: ndarray = np.empty(n_replicates, dtype=object)
-	final_losses: Tensor = torch.empty(n_replicates, device=device)
-	learning_curves: Tensor = torch.empty(n_replicates, max_iter, device=device).type(torch.FloatTensor)
+
+	best_net, best_loss, curve_of_best = None, np.inf, []
 	for i in range(n_replicates):
-		networks[i], final_losses[i], learning_curves[i, :] = train_net(model().to(device), max_iter, tolerance, data, truth, loss_fn)
-
-	#from joblib import Parallel, delayed
-	#networks, loss, learning_curves = zip(*Parallel(n_jobs=min(5, n_replicates))(
-	#	delayed(train_net)(model, max_iter, tolerance, X, y, loss_fn)
-	#	for i in range(n_replicates)
-	#))
-
-	#networks, loss, learning_curves = zip(*Parallel(n_jobs=1)(
-	#	delayed(train_net)(model, max_iter, tolerance, X, y, loss_fn)
-	#	for i in range(n_replicates)
-	#))
-
+		network, final_loss, learning_curve = train_net(model().to(device), max_iter, tolerance, data, truth, loss_fn)
+		if final_loss < best_loss:
+			best_net, best_loss, curve_of_best = network, final_loss, learning_curve
 
 	# Return the best curve along with its final loss and learing curve
-	return networks[torch.argmin(final_losses)], torch.min(final_losses), learning_curves[torch.argmin(final_losses)]
+	return best_net, best_loss, curve_of_best
 
 
 def train_net(network, max_iterations, tolerance, data, truth, loss_function):

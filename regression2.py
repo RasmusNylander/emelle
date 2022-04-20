@@ -10,8 +10,6 @@ from PCA import project_data_onto_pcs
 from loadData import load_data
 from train_neural_net import device, train_neural_net
 
-loss_function = torch.nn.MSELoss().to(device) # This is bad - NEVER DO THIS. Also, this is not thread safe.
-
 def ann_creator(input_size: int, hidden_unit_count: int):
 	return lambda: torch.nn.Sequential(
 		torch.nn.Linear(input_size, hidden_unit_count),
@@ -20,54 +18,29 @@ def ann_creator(input_size: int, hidden_unit_count: int):
 	)
 
 
-def neural_network(nn_creator, data: Tensor, truth: Tensor):
-	best_neural_network, best_final_loss, _ = train_neural_net(
-		nn_creator().to(device), loss_function, data, truth, n_replicates=3)
-	return best_neural_network, best_final_loss
-
-
 def gen_error_given_hidden_units(data: Tensor, truth: Tensor, folds: KFold, hidden_units: Tensor) -> (Tensor, Tensor):
-	N, M = data.shape
-
-	# Add offset attribute
-	# data = np.concatenate((np.ones((data.shape[0], 1)), data), axis=1)
-	# M = M + 1
-
 	# Error for each network for each fold
 	error_train: Tensor = torch.zeros(len(hidden_units), folds.n_splits, device=device)
 	error_test: Tensor = torch.empty(len(hidden_units), folds.n_splits, device=device)
 
-	data, truth = data.type(torch.FloatTensor).to(device), truth.type(torch.FloatTensor).to(device)
-
-	models = [ann_creator(M, h) for h in hidden_units]
+	models = [ann_creator(data.shape[1], h) for h in hidden_units]
 
 	for k, (train_index, test_index) in tqdm(enumerate(folds.split(data, truth)), total=folds.n_splits,
 											 desc="ANN outer fold", unit="folds"):
-		# Extract training and test set for current CV fold
-		data_train: Tensor = data[train_index]
-		truth_train: Tensor = truth[train_index]
-		data_test: Tensor = data[test_index]
-		truth_test: Tensor = truth[test_index]
-
 		def calculate_error_given_loop_index(i: int) -> None:
-			model = models[i]
 			loss_fn = torch.nn.MSELoss()
-			best_neural_network, best_final_loss, _ = train_neural_net(model, loss_fn, data_train, truth_train,
+			best_neural_network, error_train[i, k], _ = train_neural_net(models[i], loss_fn, data[train_index], truth[train_index],
 																	   n_replicates=3)
-			error_train[i, k] = best_final_loss
-			error_test[i, k] = loss_fn(best_neural_network(data_test).squeeze(), truth_test).data
+			error_test[i, k] = loss_fn(best_neural_network(data[test_index]).squeeze(), truth[test_index]).data
 
-		for i in range(len(hidden_units)):
-			calculate_error_given_loop_index(i)
-		#Parallel(n_jobs=min(5, folds.n_splits))(
-		#	delayed(calculate_error_given_loop_index)(i)
-		#	for i in range(len(hidden_units))
+		#for i in range(len(hidden_units)):
+		#	calculate_error_given_loop_index(i)
+		Parallel(n_jobs=min(len(hidden_units), 5))(
+			delayed(calculate_error_given_loop_index)(i)
+			for i in range(len(hidden_units))
 			#for i in trange(len(hidden_units), desc="Different hidden units", leave=False, unit="networks")
-		#)
-
-	error_gen: Tensor = torch.mean(error_test, dim=1)
-	error_μ_train: Tensor = torch.mean(error_train, dim=1)
-	return error_gen, error_μ_train
+		)
+	return torch.mean(error_test, dim=1), torch.mean(error_train, dim=1)
 
 
 def print_table(errors: ndarray, table_meta_info: ndarray):
@@ -119,16 +92,16 @@ if __name__ == '__main__':
 	(data, class_labels, UPDRS) = load_data("train_data.txt")
 	projected_data = project_data_onto_pcs(data, 0.9)
 	projected_data = np.concatenate((np.ones((projected_data.shape[0], 1)), projected_data), 1)
-	projected_data: Tensor = torch.from_numpy(projected_data).to(device)
-	UPDRS: Tensor = torch.from_numpy(UPDRS).to(device).type(torch.float64)
+	projected_data: Tensor = torch.from_numpy(projected_data).type(torch.FloatTensor).to(device)
+	UPDRS: Tensor = torch.from_numpy(UPDRS).to(device).type(torch.FloatTensor).to(device)
 
-	K = 5
+	K = 2
 
 	hidden_units = [1, 2, 3, 4, 5]
-	λs = torch.arange(48.87, 48.94, 0.00001)
+	λs = torch.arange(48.87, 48.94, 0.0001)
 
-	error_val = torch.empty(K, 3)
-	table_meta_info = torch.empty(K, 2)
+	error_val = torch.empty(K, 3, device=device)
+	table_meta_info = torch.empty(K, 2, device=device)
 
 	CV = KFold(n_splits=K, shuffle=True)
 	for i, (train_index, test_index) in enumerate(tqdm(CV.split(projected_data), desc="Outer fold", total=CV.n_splits, unit="fold")):
@@ -158,9 +131,11 @@ if __name__ == '__main__':
 		# Artificial neural network
 		(ann_error_val, _) = gen_error_given_hidden_units(data_train, UPDRS_train, CV2, hidden_units)
 		optimal_h = hidden_units[ann_error_val.argmin()]
-		optimal_ann = neural_network(ann_creator(data_train.shape[1], optimal_h),
-									 torch.from_numpy(data_train).to(device),
-									 torch.from_numpy(UPDRS_train).to(device))
+		loss_function = torch.nn.MSELoss()
+		optimal_ann, _, _ = train_neural_net(ann_creator(data_train.shape[1], optimal_h),
+											 loss_function,
+											 data_train,
+											 UPDRS_train)
 		error_val[i, 2] = loss_function(optimal_ann(data_test).squeeze(), UPDRS_test).data
 		table_meta_info[i, 1] = optimal_h
 	print_table(error_val, table_meta_info)
