@@ -4,9 +4,10 @@ from numpy import ndarray
 from torch import Tensor
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+tolerance: Tensor = torch.Tensor([1e-6]).to(device=device)
 
 def train_neural_net(model, loss_fn, data: Tensor, truth: Tensor,
-					 n_replicates=3, max_iter=10000, tolerance=1e-6):
+					 n_replicates=3, max_iter=10000):
 	"""
 	Train a neural network with PyTorch based on a training set consisting of
 	observations X and class y. The model and loss_fn inputs define the
@@ -76,7 +77,7 @@ def train_neural_net(model, loss_fn, data: Tensor, truth: Tensor,
 
 	best_net, best_loss, curve_of_best = None, np.inf, []
 	for i in range(n_replicates):
-		network, final_loss, learning_curve = train_net(model().to(device), max_iter, tolerance, data, truth, loss_fn)
+		network, final_loss, learning_curve = train_net(model().to(device=device), max_iter, tolerance, data, truth, loss_fn)
 		if final_loss < best_loss:
 			best_net, best_loss, curve_of_best = network, final_loss, learning_curve
 
@@ -84,23 +85,24 @@ def train_neural_net(model, loss_fn, data: Tensor, truth: Tensor,
 	return best_net, best_loss, curve_of_best
 
 
-def train_net(network, max_iterations, tolerance, data, truth, loss_function):
+def train_net(network, max_iterations: int, tolerance: Tensor, data: Tensor, truth: Tensor, loss_function):
 	import torch
 	learning_curve: Tensor = torch.zeros(max_iterations, device=device)  # setup storage for loss at each step
-	old_loss = 1e6
+	old_loss: Tensor = torch.Tensor([np.inf]).to(device=device)  # initialize with large value
 	torch.nn.init.xavier_uniform_(network[0].weight).to(device)
 	torch.nn.init.xavier_uniform_(network[2].weight).to(device)
 	optimizer = torch.optim.Adam(network.parameters())
+
 	for i in range(max_iterations):
-		y_est = network(data).squeeze() # forward pass, predict labels on training set
-		loss = loss_function(y_est, truth)  # determine loss
-		loss_value = loss.data
+		loss = loss_function(network(data).squeeze(), truth)  # determine loss
+		loss_value: Tensor = loss.data
 		learning_curve[i] = loss_value # record loss for later display
 
 		# Convergence check, see if the percentual loss decrease is within
 		# tolerance:
 		p_delta_loss = torch.abs(loss_value - old_loss) / old_loss
-		if p_delta_loss < tolerance: break
+		if p_delta_loss < tolerance:
+			break
 		old_loss = loss_value
 
 		# do backpropagation of loss and optimize weights
